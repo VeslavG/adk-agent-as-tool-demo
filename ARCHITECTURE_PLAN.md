@@ -121,6 +121,14 @@ ADK = faster development, raw API = faster execution.
 For production with a strict latency budget, the latter wins.
 Both versions share the same skill registry and business logic.
 
+**Hidden bonus: HTTP/2 connection reuse.** The direct SDK creates one
+`genai.Client` and reuses it across all calls. The first call pays
+the cold-start penalty (~4s), but subsequent calls ride the warm
+HTTP/2 connection (~1.5–2.5s). ADK creates separate internal clients
+per agent and does not benefit from this. In a production loop
+(continuous stream of phrases), the direct SDK averages ~2s per
+analysis after warmup.
+
 ## Latency summary
 
 | Architecture | LLM calls | Wall clock | Status |
