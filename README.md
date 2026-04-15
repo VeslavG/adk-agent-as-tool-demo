@@ -81,6 +81,27 @@ The three demos show a deliberate architectural evolution:
    onto agents. Independent analyses run concurrently.
    Same ADK, same tools, same knowledge — different execution model.
 
+### All business logic is reusable across execution models
+
+The key design decision: **separate knowledge from orchestration.**
+
+- **`tools.py`** — Python functions + SQL. Shared across all demos.
+- **`skills/*.md`** — domain instructions (what to analyze, how to format output).
+- **`skills/registry.toml`** — declarative index: which skills exist, which
+  tools each skill needs, what output format to expect. In production,
+  this would be Redis or a database table.
+
+These assets are **framework-independent**. The same tools and skills work
+whether you use ADK sub-agents, ADK Skills, or raw `genai.Client`:
+
+| Execution model | Tools | Skills | Registry |
+|-----------------|:-----:|:------:|:--------:|
+| `AgentTool` (Demos 1-2) | same | inline | — |
+| ADK Skills (`main.py`) | same | same `.md` | same `.toml` |
+| Direct SDK (`main_direct.py`) | same | same `.md` | same `.toml` |
+
+Switching execution models is an orchestration change, not a rewrite.
+
 ### Demo 3b: same workload, no framework
 
 `call-analyzer/main_direct.py` — identical skills, tools, and tool-call
