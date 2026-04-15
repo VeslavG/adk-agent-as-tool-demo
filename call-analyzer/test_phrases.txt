@@ -1,0 +1,5 @@
+Customer Alice says: I want to close all my accounts and move everything to another bank immediately
+Customer Bob says: I just noticed three transactions I didn't make, someone stole my card
+Customer Eve says: I've been with you for five years and your rates are still terrible, my neighbor switched to Revolut
+Customer Charlie says: Hi, I'd like to know my current balance please
+Customer Dave says: If you don't fix this today I'm going to file a complaint with the regulator

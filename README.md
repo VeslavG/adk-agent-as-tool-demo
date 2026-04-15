@@ -1,93 +1,114 @@
-# Google ADK: Agent-as-Tool Demos
+# Google ADK: Agent Orchestration Demos
 
-Two working demos of the [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/) `AgentTool` pattern — wrapping one agent as a callable tool for another agent.
+Working demos of [Google Agent Development Kit (ADK)](https://google.github.io/adk-docs/)
+patterns on Vertex AI — from prototype to production architecture.
 
-Both demos are interactive (terminal chat), show per-turn latency and token usage, and run on **Vertex AI**.
+## Demos
 
-## Demo 1: Calculator (`agent_as_tool_demo.py`)
+| # | Demo | Pattern | LLM calls | Wall clock | Folder |
+|---|------|---------|-----------|------------|--------|
+| 1 | Calculator | `AgentTool` (agent-as-tool) | 4 sequential | ~14s | `calculator/` |
+| 2 | Database Agent | `AgentTool` + FunctionTools + tracing | 4 sequential | ~14s | `db-agent/` |
+| 3a | **Call Analyzer (ADK)** | **Skills + Parallel FunctionTools** | **2×3 concurrent** | **~10s** | `call-analyzer/` |
+| 3b | **Call Analyzer (Direct)** | **genai SDK + asyncio.gather** | **2×3 concurrent** | **~4s** | `call-analyzer/` |
 
-Minimal example. Manager agent delegates math questions to a Calculator sub-agent.
+All demos use **Google ADK** (production-ready framework), **Vertex AI**,
+and **Gemini** models. Interactive terminal UI with latency and token metrics.
 
-```
-User  <-->  Manager Agent  --AgentTool-->  Calculator Agent
-            (orchestrator)                 (LLM does math)
-```
+---
 
-```
-You: 2+2?
-  >> [manager] calls tool 'calculator' with: {'request': '2+2'}
-  << tool 'calculator' returned: {'result': '4'}
-[manager]: 2+2 = 4.
-  [12475ms | prompt=254 | output=11 | thinking=30]
-```
+## Demo 1: Calculator (`calculator/`)
 
-The calculator "thinks" about math (no real computation) — this is intentionally naive to contrast with Demo 2.
-
-## Demo 2: Database Agent (`db_agent_demo.py`)
-
-Realistic example. Manager agent delegates data questions to a DB Agent, which calls **real Python functions** that execute **real SQL** against a SQLite database.
+Minimal `AgentTool` example. Manager agent wraps a Calculator sub-agent as a tool.
 
 ```
-User  <-->  Manager Agent  --AgentTool-->  DB Agent
-            (conversational)               (data specialist)
-                                              |
-                                       FunctionTools (Python)
-                                              |
-                                         SQLite database
+User  →  Manager Agent  --AgentTool-->  Calculator Agent
 ```
 
-The DB Agent has 4 tools (plain Python functions, auto-wrapped by ADK):
-
-| Tool | SQL |
-|------|-----|
-| `get_user_by_name(name)` | `SELECT ... WHERE name = ?` |
-| `get_user_by_id(user_id)` | `SELECT ... WHERE id = ?` |
-| `count_users()` | `SELECT COUNT(*)` |
-| `get_top_balances(limit)` | `SELECT ... ORDER BY balance DESC LIMIT ?` |
-
-```
-You: what is Eve's ID?
-  >> [manager] calls 'db_agent' with {'request': "What is Eve's ID?"}
-  << 'db_agent' returned: {'result': '{"id": 5, "name": "Eve", "balance": 7391.07}'}
-[manager]: Eve's ID is 5.
-  [15678ms | prompt=414 | output=23 | thinking=45]
+Three lines of ADK are the core idea:
+```python
+calculator = Agent(name="calculator", ...)
+calculator_tool = AgentTool(agent=calculator)
+manager = Agent(..., tools=[calculator_tool])
 ```
 
-### Tracing
+## Demo 2: Database Agent (`db-agent/`)
 
-Demo 2 exports OpenTelemetry spans to `trace.jsonl` (one JSON per line). Each span includes trace/span IDs, parent-child relationships, duration, token counts, and tool call arguments.
-
-Span tree for a single query:
+Realistic `AgentTool` example with real SQL (SQLite), parameterized queries,
+and OpenTelemetry tracing exported to `trace.jsonl`.
 
 ```
-invocation                                    15678ms
-  invoke_agent manager                        15678ms
-    call_llm (manager -> gemini-3-flash)      12075ms  in=155 out=15 think=45
-      execute_tool db_agent (AgentTool)         7682ms
-        invoke_agent db_agent                   7682ms
-          call_llm (db_agent -> gemini)          3917ms  in=259 out=13 think=57
-            execute_tool get_user_by_name         0.0ms  <-- actual SQL
-          call_llm (db_agent -> gemini)          3764ms  in=395 out=24
-    call_llm (manager -> gemini)                3600ms  in=259 out=8
+User  →  Manager Agent  --AgentTool-->  DB Agent  → FunctionTools → SQL
 ```
 
-## Prerequisites
+## Demo 3: Call Center Analyzer (`call-analyzer/`)
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) package manager
-- Google Cloud project with Vertex AI API enabled
-- `gcloud auth application-default login` (authenticated)
+**Production pattern.** Three agents analyze a customer's phrase concurrently.
+Each agent's behavior is defined by a **Skill** (`.md` file), and its
+capabilities come from shared **FunctionTools** (Python + SQL).
+
+```
+              ┌─ Scorer Agent ─────── skills/scorer.md + tools.py
+User input ───┼─ Red Flags Agent ──── skills/red_flags.md + tools.py
+              └─ Advisor Agent ─────── skills/advisor.md + tools.py
+              (all three run concurrently)
+```
+
+```
+Phrase: Customer Alice says: I want to close all my accounts
+
+  [scorer]     Urgency: 10/10 | Sentiment: negative | Churn risk: HIGH
+  [red_flags]  ⚠ Account closure request  ⚠ High-value customer churn
+  [advisor]    1. Offer retention package  2. Escalate to specialist
+
+  wall clock: 10495ms (sum of individual: 25335ms)
+```
+
+**To change agent behavior, edit the skill file. No code changes.**
+
+---
+
+## Evolution: prototype → production
+
+The three demos show a deliberate architectural evolution:
+
+1. **Prototype** (Demos 1-2): `AgentTool` pattern — sub-agents wrapped as tools.
+   Correct domain knowledge and tool structure, but sequential execution
+   (4 LLM calls, ~14s).
+
+2. **Production** (Demo 3): Sub-agents are **promoted to Skills**.
+   Domain knowledge moves to `.md` files. Function tools move directly
+   onto agents. Independent analyses run concurrently.
+   Same ADK, same tools, same knowledge — different execution model.
+
+### Demo 3b: same workload, no framework
+
+`call-analyzer/main_direct.py` — identical skills, tools, and tool-call
+flow, but using `genai.Client` + `asyncio.gather` instead of ADK.
+Same `registry.toml`, same business logic, same number of LLM calls.
+
+| Approach | Latency (3 agents, concurrent) |
+|----------|-------------------------------:|
+| ADK (`main.py`) | ~10s |
+| **Direct SDK (`main_direct.py`)** | **~4s** |
+
+**2.5x faster.** The difference is pure framework overhead.
+
+*Measured on the same Vertex AI project, April 2025.
+See [LATENCY.md](LATENCY.md) for full benchmarks.*
+
+See [ARCHITECTURE_PLAN.md](ARCHITECTURE_PLAN.md) for the full rationale
+and [LATENCY.md](LATENCY.md) for latency analysis.
+
+---
 
 ## Setup
 
 ```bash
-cd adk
+# Prerequisites: Python 3.12+, uv, gcloud auth
 uv sync
-```
 
-Edit the `GOOGLE_CLOUD_PROJECT` in either demo file to match your GCP project, or set the env var:
-
-```bash
+# Set your GCP project (or edit the scripts directly)
 export GOOGLE_CLOUD_PROJECT=your-project-id
 export GOOGLE_CLOUD_LOCATION=global
 export GOOGLE_GENAI_USE_VERTEXAI=true
@@ -96,69 +117,72 @@ export GOOGLE_GENAI_USE_VERTEXAI=true
 ## Run
 
 ```bash
-# Demo 1: Calculator (minimal AgentTool example)
-uv run python agent_as_tool_demo.py
+# Demo 1: Calculator (minimal AgentTool)
+uv run python calculator/main.py
 
-# Demo 2: Database Agent (realistic, with tracing)
-uv run python db_agent_demo.py
+# Demo 2: Database Agent (AgentTool + SQL + tracing)
+uv run python db-agent/main.py
+
+# Demo 3a: Call Analyzer — ADK (Skills + Parallel)
+cd call-analyzer
+uv run python main.py           # interactive, type 'test' for all phrases
+
+# Demo 3b: Call Analyzer — Direct SDK (same workload, no ADK)
+uv run python main_direct.py    # same interface, ~2.5x faster
+```
+
+## File structure
+
+```
+adk/
+├── calculator/              Demo 1: minimal AgentTool
+│   └── main.py
+├── db-agent/                Demo 2: AgentTool + SQL + tracing
+│   └── main.py
+├── call-analyzer/           Demo 3: Skills + parallel execution
+│   ├── main.py              ADK version (~10s)
+│   ├── main_direct.py       Direct genai SDK (~4s) — same workload
+│   ├── tools.py             shared FunctionTools (Python + SQL)
+│   ├── skills/              knowledge layer
+│   │   ├── registry.toml    skill index (tools, output format)
+│   │   ├── scorer.md
+│   │   ├── red_flags.md
+│   │   └── advisor.md
+│   └── test_phrases.txt
+├── ARCHITECTURE_PLAN.md     design rationale (McKinsey pyramid)
+├── LATENCY.md               latency analysis + benchmarks
+└── pyproject.toml
 ```
 
 ## Test cases
 
 ### Demo 1 (Calculator)
 
-| Input | Expected behavior |
-|-------|-------------------|
-| `hello` | Manager answers directly, no tool call |
-| `2+2` | Manager calls calculator tool, returns 4 |
-| `what is 123 * 456 + 789?` | Calculator tool called, returns 56877 |
-| `roses are red?` | Manager answers directly (not math) |
+| Input | Expected |
+|-------|----------|
+| `hello` | Direct answer, no tool call |
+| `2+2` | Tool call → calculator → 4 |
 
-### Demo 2 (Database)
+### Demo 2 (Database Agent)
 
-| Input | Expected behavior |
-|-------|-------------------|
-| `hello` | Manager answers directly, no tool call |
-| `What is Eve's ID?` | manager -> db_agent -> `get_user_by_name("Eve")` -> ID 5 |
-| `Tell me about user 3` | manager -> db_agent -> `get_user_by_id(3)` -> Charlie |
-| `How many users?` | manager -> db_agent -> `count_users()` -> 6 |
-| `Who are the top 3 richest?` | manager -> db_agent -> `get_top_balances(3)` -> Eve, Frank, Alice |
-| `What is the weather?` | Manager answers directly (not a data question) |
+| Input | Expected |
+|-------|----------|
+| `What is Eve's ID?` | Tool call → db_agent → SQL → ID 5 |
+| `How many users?` | Tool call → db_agent → SQL → 6 |
+| `Who are the top 3 richest?` | Tool call → db_agent → SQL → Eve, Frank, Alice |
 
-## Key ADK concepts used
+### Demo 3 (Call Analyzer)
 
-- **`Agent`** — LLM agent with instruction, model, and tools
-- **`AgentTool`** — wraps an Agent so it can be called as a tool by another Agent
-- **`FunctionTool`** (implicit) — plain Python functions auto-wrapped by ADK via type hints and docstrings
-- **`Runner`** — executes the agent loop (LLM call -> tool call -> LLM call -> ...)
-- **`InMemorySessionService`** — tracks conversation state between turns
-- **OpenTelemetry tracing** — built into ADK, exportable to file/Jaeger/Cloud Trace
-
-## Latency notes
-
-Each tool call = multiple LLM round-trips:
-
-1. Manager LLM call (~3.5s) — decides to call tool
-2. Sub-agent LLM call (~3.5s) — decides which function to use
-3. Function execution (~0ms for SQLite)
-4. Sub-agent LLM call (~3.5s) — formulates response
-5. Manager LLM call (~3.5s) — presents result to user
-
-Total: **~14s per tool call** (4 LLM round-trips). This is an architectural reality of multi-agent systems, not a bug.
-
-## Files
-
-```
-adk/
-  agent_as_tool_demo.py   # Demo 1: Calculator (minimal)
-  db_agent_demo.py        # Demo 2: Database (realistic + tracing)
-  trace.jsonl             # OpenTelemetry spans (generated by Demo 2)
-  pyproject.toml          # uv project config
-```
+| Input | Scorer | Red Flags | Advisor |
+|-------|--------|-----------|---------|
+| Alice: close accounts | 10/10, HIGH churn | ⚠ closure, ⚠ churn | Retention package |
+| Bob: stolen card | 10/10, negative | ⚠ fraud | Freeze card, dispute |
+| Charlie: balance inquiry | 2/10, neutral | ✓ No flags | Provide balance |
+| Dave: regulator threat | 10/10, negative | ⚠ regulatory | De-escalate, supervisor |
 
 ## Links
 
 - [ADK Documentation](https://google.github.io/adk-docs/)
-- [ADK GitHub (Python)](https://github.com/google/adk-python)
-- [ADK Samples](https://github.com/google/adk-samples)
+- [ADK Skills Guide](https://developers.googleblog.com/developers-guide-to-building-adk-agents-with-skills/)
+- [ADK GitHub](https://github.com/google/adk-python)
 - [Vertex AI Agent Engine](https://cloud.google.com/vertex-ai/generative-ai/docs/agent-builder/adk-overview)

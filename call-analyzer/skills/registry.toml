@@ -1,0 +1,21 @@
+# Skill Registry — declarative index of all agent skills.
+# In production this would be Redis, Firestore, or a DB table.
+# Each skill defines: what it does, what tools it needs, what output to expect.
+
+[scorer]
+description = "Sentiment, urgency, and churn risk scoring"
+instruction = "scorer.md"
+tools = ["get_customer_profile", "get_high_value_threshold"]
+output_format = "Urgency: N/10 | Sentiment: X | Churn risk: X"
+
+[red_flags]
+description = "Compliance and risk flag detection"
+instruction = "red_flags.md"
+tools = ["get_customer_profile", "get_high_value_threshold"]
+output_format = "⚠ [flag] per line, or ✓ No flags detected"
+
+[advisor]
+description = "Operator next-action recommendations"
+instruction = "advisor.md"
+tools = ["get_customer_profile", "get_high_value_threshold"]
+output_format = "1-2 numbered actions"
